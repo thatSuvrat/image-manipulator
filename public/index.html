@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Palette — k-means painter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #17140f;
+    --panel: #221d16;
+    --panel-2: #2a2419;
+    --border: #3c3324;
+    --cream: #efe6d3;
+    --cream-dim: #b7ab92;
+    --accent: #cf5c1f;
+    --accent-soft: #e8b34a;
+    --teal: #3c6b5e;
+    --danger: #a8402a;
+  }
+  *{ box-sizing: border-box; }
+  body{
+    margin:0;
+    background: var(--bg);
+    background-image:
+      radial-gradient(circle at 15% 10%, rgba(207,92,31,0.06), transparent 40%),
+      radial-gradient(circle at 85% 90%, rgba(60,107,94,0.08), transparent 45%);
+    color: var(--cream);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+  }
+  .wrap{
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 24px 60px;
+  }
+  header{
+    display:flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 18px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .eyebrow{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-soft);
+  }
+  h1{
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 30px;
+    margin: 4px 0 0;
+    letter-spacing: -0.01em;
+  }
+  h1 em{
+    font-style: italic;
+    font-weight: 500;
+    color: var(--accent);
+  }
+  .subtitle{
+    font-size: 13px;
+    color: var(--cream-dim);
+    max-width: 280px;
+    text-align: right;
+    line-height: 1.5;
+  }
+  .layout{
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+  @media (max-width: 860px){
+    .layout{ grid-template-columns: 1fr; }
+    .subtitle{ text-align:left; }
+  }
+
+  /* --- Canvas / dropzone --- */
+  .stage{
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+  }
+  #dropzone{
+    position: relative;
+    border: 1.5px dashed var(--border);
+    border-radius: 4px;
+    min-height: 420px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+    overflow: hidden;
+    background: repeating-linear-gradient(135deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 2px, transparent 2px, transparent 10px);
+  }
+  #dropzone.drag{
+    border-color: var(--accent);
+    background: rgba(207,92,31,0.06);
+  }
+  #dropzone canvas{
+    max-width: 100%;
+    max-height: 560px;
+    display: none;
+    border-radius: 2px;
+  }
+  .drop-msg{
+    padding: 40px;
+    color: var(--cream-dim);
+  }
+  .drop-msg .icon{
+    font-family: 'Fraunces', serif;
+    font-size: 15px;
+    font-style: italic;
+    color: var(--accent-soft);
+    display:block;
+    margin-bottom: 10px;
+  }
+  .drop-msg .small{
+    font-size: 12px;
+    margin-top: 6px;
+    color: #7d715c;
+  }
+  #fileInput{ display:none; }
+
+  .stage-footer{
+    display:flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--cream-dim);
+  }
+  #status{ color: var(--accent-soft); }
+  #status.idle{ color: var(--cream-dim); }
+
+  /* --- Palette dabs (signature element) --- */
+  .palette-strip{
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-height: 34px;
+    align-items: center;
+  }
+  .dab{
+    width: 26px;
+    height: 22px;
+    display: inline-block;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.4);
+  }
+  .dab:nth-child(3n){ border-radius: 60% 40% 55% 45% / 45% 55% 40% 60%; }
+  .dab:nth-child(3n+1){ border-radius: 45% 55% 40% 60% / 60% 40% 55% 45%; }
+  .dab:nth-child(3n+2){ border-radius: 55% 45% 60% 40% / 40% 60% 45% 55%; }
+  .palette-note{
+    font-size: 12px;
+    color: var(--cream-dim);
+    font-style: italic;
+    font-family: 'Fraunces', serif;
+  }
+
+  /* --- Controls panel --- */
+  .panel{
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px;
+  }
+  .panel + .panel{ margin-top: 16px; }
+  .panel-title{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--cream-dim);
+    margin-bottom: 14px;
+    display:flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .row{ margin-bottom: 16px; }
+  .row:last-child{ margin-bottom: 0; }
+  .row-head{
+    display:flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+  .row-head label{ color: var(--cream); }
+  .row-head .val{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent-soft);
+  }
+  input[type=range]{
+    -webkit-appearance: none;
+    width: 100%;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  input[type=range]:disabled::-webkit-slider-thumb{
+    background: #555;
+    box-shadow: none;
+  }
+  input[type=range]::-moz-range-thumb{
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid var(--bg);
+  }
+
+  .toggle-row{
+    display:flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    cursor: pointer;
+  }
+  .toggle-row span{ font-size: 13px; }
+  .switch{
+    width: 34px;
+    height: 19px;
+    border-radius: 10px;
+    background: var(--border);
+    position: relative;
+    transition: background .15s ease;
+    flex-shrink: 0;
+  }
+  .switch::after{
+    content:'';
+    position:absolute;
+    width: 15px; height: 15px;
+    border-radius: 50%;
+    background: var(--cream-dim);
+    top: 2px; left: 2px;
+    transition: transform .15s ease, background .15s ease;
+  }
+  .toggle-row.on .switch{ background: rgba(207,92,31,0.35); }
+  .toggle-row.on .switch::after{ transform: translateX(15px); background: var(--accent); }
+
+  .sub-controls{
+    padding-left: 2px;
+    margin-top: 12px;
+    opacity: 1;
+    transition: opacity .15s ease;
+  }
+  .sub-controls.disabled{ opacity: 0.35; pointer-events: none; }
+
+  button{
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    font-size: 13px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .btn-primary{
+    background: var(--accent);
+    color: #1a1208;
+    border-color: var(--accent);
+    width: 100%;
+    font-weight: 600;
+  }
+  .btn-primary:hover{ background: #e0691f; }
+  .btn-primary:disabled{
+    background: var(--border);
+    border-color: var(--border);
+    color: var(--cream-dim);
+    cursor: not-allowed;
+  }
+  .btn-secondary{
+    background: transparent;
+    color: var(--cream-dim);
+    width: 100%;
+    margin-top: 8px;
+  }
+  .btn-secondary:hover{ color: var(--cream); border-color: var(--cream-dim); }
+
+  .hint{
+    font-size: 11.5px;
+    color: #7d715c;
+    line-height: 1.5;
+    margin-top: 14px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="eyebrow">k-means · 003</div>
+      <h1>Palette<em>.</em></h1>
+    </div>
+    <div class="subtitle">Reduce a photo to its essential colors, then push it toward paint with smoothing and brushwork.</div>
+  </header>
+
+  <div class="layout">
+    <div class="stage">
+      <div id="dropzone">
+        <div class="drop-msg" id="dropMsg">
+          <span class="icon">drag a photo in</span>
+          click to browse, or paste with ⌘V / Ctrl+V
+          <div class="small">JPG or PNG · processed entirely in your browser</div>
+        </div>
+        <canvas id="canvas"></canvas>
+      </div>
+      <input type="file" id="fileInput" accept="image/*">
+      <div class="stage-footer">
+        <span id="status" class="idle">waiting for an image</span>
+        <span id="dims"></span>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <div class="panel-title">Palette</div>
+        <div class="palette-strip" id="paletteStrip"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Colors</div>
+        <div class="toggle-row on" id="quantizeToggle">
+          <span>Color quantization</span>
+          <div class="switch"></div>
+        </div>
+        <div class="sub-controls" id="quantizeControls">
+          <div class="row">
+            <div class="row-head">
+              <label for="kSlider">Color count (k)</label>
+              <span class="val" id="kVal">8</span>
+            </div>
+            <input type="range" id="kSlider" min="2" max="32" value="8" step="1">
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Smoothing</div>
+        <div class="toggle-row" id="smoothToggle">
+          <span>Bilateral smoothing</span>
+          <div class="switch"></div>
+        </div>
+        <div class="sub-controls disabled" id="smoothControls">
+          <div class="row">
+            <div class="row-head">
+              <label for="smoothSlider">Strength</label>
+              <span class="val" id="smoothVal">75</span>
+            </div>
+            <input type="range" id="smoothSlider" min="10" max="150" value="75" step="1" disabled>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Brushwork</div>
+        <div class="toggle-row" id="brushToggle">
+          <span>Brush-stroke texture</span>
+          <div class="switch"></div>
+        </div>
+        <div class="sub-controls disabled" id="brushControls">
+          <div class="row">
+            <div class="row-head">
+              <label for="brushRadius">Stroke size</label>
+              <span class="val" id="brushRadiusVal">5</span>
+            </div>
+            <input type="range" id="brushRadius" min="1" max="10" value="5" step="1" disabled>
+          </div>
+          <div class="row">
+            <div class="row-head">
+              <label for="brushLevels">Detail</label>
+              <span class="val" id="brushLevelsVal">18</span>
+            </div>
+            <input type="range" id="brushLevels" min="4" max="30" value="18" step="1" disabled>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <button class="btn-primary" id="downloadBtn" disabled>Download painting</button>
+        <button class="btn-secondary" id="resetBtn">Load a different image</button>
+        <div class="hint">Processing happens at a capped resolution so sliders stay responsive. Download saves the current result at that same resolution.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const MAX_DIM = 560; // capped processing resolution for interactivity
+
+  const dropzone = document.getElementById('dropzone');
+  const dropMsg = document.getElementById('dropMsg');
+  const fileInput = document.getElementById('fileInput');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const dimsEl = document.getElementById('dims');
+  const paletteStrip = document.getElementById('paletteStrip');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const resetBtn = document.getElementById('resetBtn');
+
+  const kSlider = document.getElementById('kSlider');
+  const kVal = document.getElementById('kVal');
+  const quantizeToggleEl = document.getElementById('quantizeToggle');
+  const quantizeControls = document.getElementById('quantizeControls');
+  const smoothToggleEl = document.getElementById('smoothToggle');
+  const smoothControls = document.getElementById('smoothControls');
+  const smoothSlider = document.getElementById('smoothSlider');
+  const smoothVal = document.getElementById('smoothVal');
+  const brushToggleEl = document.getElementById('brushToggle');
+  const brushControls = document.getElementById('brushControls');
+  const brushRadius = document.getElementById('brushRadius');
+  const brushRadiusVal = document.getElementById('brushRadiusVal');
+  const brushLevels = document.getElementById('brushLevels');
+  const brushLevelsVal = document.getElementById('brushLevelsVal');
+
+  let originalImageData = null; // ImageData at capped resolution
+  let width = 0, height = 0;
+  let smoothOn = false, brushOn = false, quantizeOn = true;
+  let debounceTimer = null;
+  let processing = false;
+  let pendingRerun = false;
+
+  // ---------- Image loading ----------
+
+  function loadFile(file){
+    if (!file || !file.type.startsWith('image/')) return;
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = e => { img.src = e.target.result; };
+    reader.onerror = () => setStatus('could not read that file', true);
+    img.onload = () => {
+      let w = img.naturalWidth, h = img.naturalHeight;
+      const scale = Math.min(1, MAX_DIM / Math.max(w, h));
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+      width = w; height = h;
+      canvas.width = w; canvas.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+      originalImageData = ctx.getImageData(0, 0, w, h);
+
+      dropMsg.style.display = 'none';
+      canvas.style.display = 'block';
+      dimsEl.textContent = w + ' × ' + h + ' (working res)';
+      downloadBtn.disabled = false;
+      process();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+
+  ['dragenter','dragover'].forEach(evt => {
+    dropzone.addEventListener(evt, e => {
+      e.preventDefault(); e.stopPropagation();
+      dropzone.classList.add('drag');
+    });
+  });
+  ['dragleave','drop'].forEach(evt => {
+    dropzone.addEventListener(evt, e => {
+      e.preventDefault(); e.stopPropagation();
+      dropzone.classList.remove('drag');
+    });
+  });
+  dropzone.addEventListener('drop', e => {
+    const file = e.dataTransfer.files[0];
+    loadFile(file);
+  });
+
+  document.addEventListener('paste', e => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const item of items){
+      if (item.type.startsWith('image/')){
+        loadFile(item.getAsFile());
+        e.preventDefault();
+        break;
+      }
+    }
+  });
+
+  resetBtn.addEventListener('click', () => {
+    originalImageData = null;
+    dropMsg.style.display = 'block';
+    canvas.style.display = 'none';
+    dimsEl.textContent = '';
+    downloadBtn.disabled = true;
+    paletteStrip.innerHTML = '';
+    setStatus('waiting for an image', false, true);
+    fileInput.value = '';
+  });
+
+  // ---------- Controls wiring ----------
+
+  function setStatus(msg, isError, idle){
+    statusEl.textContent = msg;
+    statusEl.classList.toggle('idle', !!idle);
+    statusEl.style.color = isError ? 'var(--danger)' : '';
+  }
+
+  quantizeToggleEl.addEventListener('click', () => {
+    quantizeOn = !quantizeOn;
+    quantizeToggleEl.classList.toggle('on', quantizeOn);
+    quantizeControls.classList.toggle('disabled', !quantizeOn);
+    kSlider.disabled = !quantizeOn;
+    scheduleProcess();
+  });
+  kSlider.addEventListener('input', () => { kVal.textContent = kSlider.value; scheduleProcess(); });
+
+  smoothToggleEl.addEventListener('click', () => {
+    smoothOn = !smoothOn;
+    smoothToggleEl.classList.toggle('on', smoothOn);
+    smoothControls.classList.toggle('disabled', !smoothOn);
+    smoothSlider.disabled = !smoothOn;
+    scheduleProcess();
+  });
+  smoothSlider.addEventListener('input', () => { smoothVal.textContent = smoothSlider.value; scheduleProcess(); });
+
+  brushToggleEl.addEventListener('click', () => {
+    brushOn = !brushOn;
+    brushToggleEl.classList.toggle('on', brushOn);
+    brushControls.classList.toggle('disabled', !brushOn);
+    brushRadius.disabled = !brushOn;
+    brushLevels.disabled = !brushOn;
+    scheduleProcess();
+  });
+  brushRadius.addEventListener('input', () => { brushRadiusVal.textContent = brushRadius.value; scheduleProcess(); });
+  brushLevels.addEventListener('input', () => { brushLevelsVal.textContent = brushLevels.value; scheduleProcess(); });
+
+  function scheduleProcess(){
+    if (!originalImageData) return;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(process, 220);
+  }
+
+  downloadBtn.addEventListener('click', () => {
+    const link = document.createElement('a');
+    link.download = 'painting.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  });
+
+  // ---------- Image processing pipeline ----------
+
+  function process(){
+    if (!originalImageData) return;
+    if (processing){ pendingRerun = true; return; }
+    processing = true;
+    setStatus('painting…');
+    // let the status text paint before the heavy synchronous work runs
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try {
+          runPipeline();
+        } finally {
+          processing = false;
+          if (pendingRerun){ pendingRerun = false; process(); }
+        }
+      }, 10);
+    });
+  }
+
+  function runPipeline(){
+    let pixels = new Uint8ClampedArray(originalImageData.data);
+
+    if (smoothOn){
+      pixels = bilateralFilter(pixels, width, height, parseInt(smoothSlider.value, 10));
+    }
+
+    let statusMsg;
+    if (quantizeOn){
+      const k = parseInt(kSlider.value, 10);
+      const { pixels: quantized, centroids } = kmeansQuantize(pixels, width, height, k);
+      pixels = quantized;
+      renderPalette(centroids);
+      statusMsg = 'done — ' + k + ' colors';
+    } else {
+      paletteStrip.innerHTML = '<span class="palette-note">quantization off — full color range</span>';
+      statusMsg = 'done — quantization off';
+    }
+
+    if (brushOn){
+      pixels = oilPaint(pixels, width, height, parseInt(brushRadius.value, 10), parseInt(brushLevels.value, 10));
+    }
+
+    const out = new ImageData(pixels, width, height);
+    ctx.putImageData(out, 0, 0);
+    setStatus(statusMsg, false);
+  }
+
+  function renderPalette(centroids){
+    paletteStrip.innerHTML = '';
+    const k = centroids.length / 3;
+    // sort by luminance so the strip reads left-to-right dark to light
+    const order = Array.from({length: k}, (_, i) => i)
+      .sort((a, b) => (centroids[a*3]+centroids[a*3+1]+centroids[a*3+2]) - (centroids[b*3]+centroids[b*3+1]+centroids[b*3+2]));
+    order.forEach(i => {
+      const r = Math.round(centroids[i*3]), g = Math.round(centroids[i*3+1]), b = Math.round(centroids[i*3+2]);
+      const dab = document.createElement('span');
+      dab.className = 'dab';
+      dab.style.background = `rgb(${r},${g},${b})`;
+      dab.title = `rgb(${r}, ${g}, ${b})`;
+      paletteStrip.appendChild(dab);
+    });
+  }
+
+  // ---------- Algorithms ----------
+
+  // Edge-preserving smoothing: small-kernel bilateral filter.
+  function bilateralFilter(src, w, h, strength){
+    const radius = 3;
+    const sigmaColor = Math.max(1, strength);
+    const sigmaSpace = Math.max(1, strength / 10);
+    const spatial = [];
+    for (let dy = -radius; dy <= radius; dy++){
+      for (let dx = -radius; dx <= radius; dx++){
+        spatial.push(Math.exp(-(dx*dx + dy*dy) / (2 * sigmaSpace * sigmaSpace)));
+      }
+    }
+    const out = new Uint8ClampedArray(src.length);
+    for (let y = 0; y < h; y++){
+      for (let x = 0; x < w; x++){
+        const idx = (y * w + x) * 4;
+        const r0 = src[idx], g0 = src[idx+1], b0 = src[idx+2];
+        let sumR = 0, sumG = 0, sumB = 0, sumW = 0, wi = 0;
+        for (let dy = -radius; dy <= radius; dy++){
+          const yy = y + dy;
+          if (yy < 0 || yy >= h){ wi += (2*radius+1); continue; }
+          for (let dx = -radius; dx <= radius; dx++){
+            const sw = spatial[wi++];
+            const xx = x + dx;
+            if (xx < 0 || xx >= w) continue;
+            const nidx = (yy * w + xx) * 4;
+            const r1 = src[nidx], g1 = src[nidx+1], b1 = src[nidx+2];
+            const cd = (r1-r0)*(r1-r0) + (g1-g0)*(g1-g0) + (b1-b0)*(b1-b0);
+            const weight = sw * Math.exp(-cd / (2 * sigmaColor * sigmaColor));
+            sumR += r1 * weight; sumG += g1 * weight; sumB += b1 * weight; sumW += weight;
+          }
+        }
+        out[idx]   = sumW > 0 ? sumR / sumW : r0;
+        out[idx+1] = sumW > 0 ? sumG / sumW : g0;
+        out[idx+2] = sumW > 0 ? sumB / sumW : b0;
+        out[idx+3] = src[idx+3];
+      }
+    }
+    return out;
+  }
+
+  // K-means color quantization: fit on a random sample, assign every pixel.
+  function kmeansQuantize(src, w, h, k, iterations){
+    iterations = iterations || 8;
+    const n = w * h;
+    const sampleSize = Math.min(4000, n);
+    const samples = new Float32Array(sampleSize * 3);
+    for (let i = 0; i < sampleSize; i++){
+      const p = Math.floor(Math.random() * n) * 4;
+      samples[i*3] = src[p]; samples[i*3+1] = src[p+1]; samples[i*3+2] = src[p+2];
+    }
+
+    // init centroids from distinct random samples
+    const centroids = new Float32Array(k * 3);
+    const usedIdx = new Set();
+    for (let c = 0; c < k; c++){
+      let idx = Math.floor(Math.random() * sampleSize);
+      let tries = 0;
+      while (usedIdx.has(idx) && tries < 50){ idx = Math.floor(Math.random() * sampleSize); tries++; }
+      usedIdx.add(idx);
+      centroids[c*3] = samples[idx*3]; centroids[c*3+1] = samples[idx*3+1]; centroids[c*3+2] = samples[idx*3+2];
+    }
+
+    for (let iter = 0; iter < iterations; iter++){
+      const sums = new Float64Array(k * 3);
+      const counts = new Float64Array(k);
+      for (let i = 0; i < sampleSize; i++){
+        const r = samples[i*3], g = samples[i*3+1], b = samples[i*3+2];
+        let best = 0, bestDist = Infinity;
+        for (let c = 0; c < k; c++){
+          const dr = r - centroids[c*3], dg = g - centroids[c*3+1], db = b - centroids[c*3+2];
+          const dist = dr*dr + dg*dg + db*db;
+          if (dist < bestDist){ bestDist = dist; best = c; }
+        }
+        sums[best*3] += r; sums[best*3+1] += g; sums[best*3+2] += b; counts[best]++;
+      }
+      for (let c = 0; c < k; c++){
+        if (counts[c] > 0){
+          centroids[c*3] = sums[c*3] / counts[c];
+          centroids[c*3+1] = sums[c*3+1] / counts[c];
+          centroids[c*3+2] = sums[c*3+2] / counts[c];
+        }
+      }
+    }
+
+    const out = new Uint8ClampedArray(src.length);
+    for (let i = 0; i < n; i++){
+      const p = i * 4;
+      const r = src[p], g = src[p+1], b = src[p+2];
+      let best = 0, bestDist = Infinity;
+      for (let c = 0; c < k; c++){
+        const dr = r - centroids[c*3], dg = g - centroids[c*3+1], db = b - centroids[c*3+2];
+        const dist = dr*dr + dg*dg + db*db;
+        if (dist < bestDist){ bestDist = dist; best = c; }
+      }
+      out[p] = centroids[best*3]; out[p+1] = centroids[best*3+1]; out[p+2] = centroids[best*3+2]; out[p+3] = src[p+3];
+    }
+    return { pixels: out, centroids };
+  }
+
+  // Brush-stroke texture: classic oil-painting filter (most-frequent intensity bin in a neighborhood).
+  function oilPaint(src, w, h, radius, levels){
+    const out = new Uint8ClampedArray(src.length);
+    const binCount = new Int32Array(levels);
+    const binR = new Float64Array(levels);
+    const binG = new Float64Array(levels);
+    const binB = new Float64Array(levels);
+
+    for (let y = 0; y < h; y++){
+      for (let x = 0; x < w; x++){
+        binCount.fill(0); binR.fill(0); binG.fill(0); binB.fill(0);
+        for (let dy = -radius; dy <= radius; dy++){
+          const yy = y + dy;
+          if (yy < 0 || yy >= h) continue;
+          for (let dx = -radius; dx <= radius; dx++){
+            const xx = x + dx;
+            if (xx < 0 || xx >= w) continue;
+            const idx = (yy * w + xx) * 4;
+            const r = src[idx], g = src[idx+1], b = src[idx+2];
+            let bin = Math.floor(((r + g + b) / 3) / 256 * levels);
+            if (bin >= levels) bin = levels - 1;
+            binCount[bin]++; binR[bin] += r; binG[bin] += g; binB[bin] += b;
+          }
+        }
+        let maxBin = 0, maxCount = -1;
+        for (let i = 0; i < levels; i++){
+          if (binCount[i] > maxCount){ maxCount = binCount[i]; maxBin = i; }
+        }
+        const idx = (y * w + x) * 4;
+        out[idx]   = binR[maxBin] / maxCount;
+        out[idx+1] = binG[maxBin] / maxCount;
+        out[idx+2] = binB[maxBin] / maxCount;
+        out[idx+3] = src[idx+3];
+      }
+    }
+    return out;
+  }
+
+})();
+</script>
+</body>
+</html>
